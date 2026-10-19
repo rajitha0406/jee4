@@ -94,6 +94,23 @@ select{font:inherit;font-size:13px;background:var(--surface);color:var(--ink);bo
 .badge{display:none;background:#e53e3e;color:#fff;border-radius:999px;padding:0 7px;font-size:12px;margin-left:6px;font-weight:600}
 .card2{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:14px 0}
 .card2 input[type=time]{font:inherit;font-size:13px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+.pbar{display:flex;align-items:center;gap:8px;margin:4px 0 10px}
+.pbar .arrow{flex:none;width:42px;height:42px;font-size:22px;line-height:1;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.pbar .arrow:disabled{opacity:.35;cursor:default}
+.pbar .arrow:hover:not(:disabled){background:var(--bg)}
+.plabel{flex:1;text-align:center;min-width:0}
+.plabel b{display:block;font-size:16px}
+.plabel small{color:var(--muted)}
+.pbar2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.pbar2 input[type=date]{font:inherit;font-size:13px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.wkstrip{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px}
+.dchip{flex:1 0 46px;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;font-size:12px;background:var(--surface);color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:6px 4px;cursor:pointer}
+.dchip b{font-size:15px;color:var(--ink)}
+.dchip[aria-current="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.dchip[aria-current="true"] b{color:var(--bg)}
+.dchip i{display:block;width:6px;height:6px;border-radius:50%;background:transparent;margin-top:2px}
+.dchip i.ok{background:var(--done)}.dchip i.miss{background:#e53e3e}
+.dchip.tdy{border-color:var(--ink)}
 </style>
 </head>
 <body>
@@ -246,14 +263,59 @@ function viewToday(){
 }
 
 function mondayOf(iso){ const d=new Date(iso+"T00:00:00"); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
-function viewPlan(){
-  const groups={}; DATA.days.forEach(d=>{ (groups[mondayOf(d.date)] ||= []).push(d); });
-  const t=localISO();
-  return Object.keys(groups).sort().map((m,i)=>{
-    const ds=groups[m]; const mins=ds.reduce((a,d)=>a+d.total,0);
-    return `<section class="week"><h2>Week ${i+1}: ${fmtDate(ds[0].date)} to ${fmtDate(ds[ds.length-1].date)}</h2><div class="weekmeta">${hrs(mins)} planned</div>${ds.map(d=>dayCard(d,d.date===t)).join('')}</section>`;
-  }).join('');
+let planDate = null;
+function clampDay(iso){
+  const ds = DATA.days.map(d=>d.date);
+  if (ds.includes(iso)) return iso;
+  return iso < ds[0] ? ds[0] : iso > ds[ds.length-1] ? ds[ds.length-1] : ds.find(x=>x>iso);
 }
+function dayStatus(d){
+  const t = localISO(); let n=0, dn=0;
+  d.blocks.forEach(bl=>{ if(isOptional(bl)) return; bl.items.forEach((it,i)=>{ n++; if(state.done[itemKey(d,bl,i)]) dn++; }); });
+  if (!n) return '';
+  if (dn===n) return 'ok';
+  return d.date < t ? 'miss' : '';
+}
+function stepPlan(n){
+  const i = DATA.days.findIndex(d=>d.date===planDate);
+  const j = Math.max(0, Math.min(DATA.days.length-1, i+n));
+  planDate = DATA.days[j].date; render();
+}
+function viewPlan(){
+  if (!planDate) planDate = clampDay(localISO());
+  const t = localISO();
+  const idx = DATA.days.findIndex(d=>d.date===planDate);
+  const day = DATA.days[idx];
+  const mon = mondayOf(day.date);
+  const weekDays = DATA.days.filter(d=>mondayOf(d.date)===mon);
+  const weeks = [...new Set(DATA.days.map(d=>mondayOf(d.date)))].sort();
+  const wkNo = weeks.indexOf(mon)+1;
+  const wkMins = weekDays.reduce((a,d)=>a+d.total,0);
+  const first = DATA.days[0].date, last = DATA.days[DATA.days.length-1].date;
+  const chips = weekDays.map(d=>`<button class="dchip ${d.date===t?'tdy':''}" type="button" data-pd="${d.date}" ${d.date===planDate?'aria-current="true"':''} aria-label="${esc(d.dow)} ${fmtDate(d.date)}"><span>${esc(d.dow)}</span><b>${new Date(d.date+'T00:00:00').getDate()}</b><i class="${dayStatus(d)}"></i></button>`).join('');
+  return `<div class="pbar">
+      <button class="arrow" type="button" data-pstep="-1" aria-label="Previous day" ${idx===0?'disabled':''}>&#8249;</button>
+      <div class="plabel"><b>${esc(day.dow)}, ${fmtDate(day.date)}</b><small>Week ${wkNo} of ${weeks.length} · ${hrs(wkMins)} planned</small></div>
+      <button class="arrow" type="button" data-pstep="1" aria-label="Next day" ${idx===DATA.days.length-1?'disabled':''}>&#8250;</button>
+    </div>
+    <div class="pbar2"><button class="abtn" type="button" data-ptoday="1">Today</button>
+      <label class="meta">Jump to <input type="date" id="pDate" value="${planDate}" min="${first}" max="${last}"></label></div>
+    <div class="wkstrip" aria-label="Days in this week">${chips}</div>` + dayCard(day, true);
+}
+document.getElementById('view').addEventListener('click', e=>{
+  const st = e.target.closest('[data-pstep]'); if (st) { stepPlan(+st.dataset.pstep); return; }
+  const pd = e.target.closest('[data-pd]'); if (pd) { planDate = pd.dataset.pd; render(); return; }
+  if (e.target.closest('[data-ptoday]')) { planDate = clampDay(localISO()); render(); }
+});
+document.getElementById('view').addEventListener('change', e=>{
+  if (e.target.id==='pDate' && e.target.value) { planDate = clampDay(e.target.value); render(); }
+});
+document.addEventListener('keydown', e=>{
+  if (tab!=='plan' || (e.key!=='ArrowLeft' && e.key!=='ArrowRight')) return;
+  const a = document.activeElement;
+  if (a && (a.tagName==='SELECT' || a.tagName==='TEXTAREA' || (a.tagName==='INPUT' && a.type!=='checkbox'))) return;
+  stepPlan(e.key==='ArrowRight' ? 1 : -1);
+});
 
 function viewChapters(){
   const subjects=["Physics","Chemistry","Maths"];
